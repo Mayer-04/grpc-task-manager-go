@@ -4,9 +4,7 @@ package tasks.v1;
 
 option go_package = "github.com/Mayer-04/grpc-task-manager-go/pkg/taskpb";
 
-// Manejar fechas y horas en Protocol Buffers
 import "google/protobuf/timestamp.proto";
-// Cuando una función no necesita parámetros o no retorna datos específicos
 // import "google/protobuf/empty.proto";
 
 message Task {
@@ -22,8 +20,8 @@ message Task {
 message CreateTaskRequest {
   string user_id = 1;
   string title = 2;
-  string description = 3;
-  bool completed = 4;
+  optional string description = 3;
+  optional bool completed = 4; // opcional, por defecto false
 }
 
 message CreateTaskResponse {
@@ -40,7 +38,9 @@ message GetTaskResponse {
 
 message UpdateTaskRequest {
   string id = 1;
-  Task task = 2;
+  optional string title = 2;
+  optional string description = 3;
+  optional bool completed = 4;
 }
 
 message UpdateTaskResponse {
@@ -64,9 +64,11 @@ message MarkTaskCompleteResponse {
   Task task = 1;
 }
 
-message ListTasksRequest {
+message ListTasksByUserRequest {
   string user_id = 1;
 }
+
+message ListAllTasksRequest {}
 
 message ListTasksResponse {
   repeated Task tasks = 1;
@@ -79,5 +81,6 @@ service TaskService {
   rpc UpdateTask(UpdateTaskRequest) returns (UpdateTaskResponse);
   rpc DeleteTask(DeleteTaskRequest) returns (DeleteTaskResponse);
   rpc MarkTaskComplete(MarkTaskCompleteRequest) returns (MarkTaskCompleteResponse);
-  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
+  rpc ListTasksByUser(ListTasksByUserRequest) returns (ListTasksResponse);
+  rpc ListAllTasks(ListAllTasksRequest) returns (ListTasksResponse);
 }
