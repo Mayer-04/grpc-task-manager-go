@@ -15,63 +15,80 @@ type TaskRepositoryImpl struct {
 	dbpool *pgxpool.Pool
 }
 
-func NewTaskRepository(dbpool *pgxpool.Pool) domain.TaskRepository {
+func NewTaskRepository(dbPool *pgxpool.Pool) domain.TaskRepository {
 	return &TaskRepositoryImpl{
-		dbpool: dbpool,
+		dbpool: dbPool,
 	}
 }
 
 func (t *TaskRepositoryImpl) CreateTask(ctx context.Context, task *domain.Task) (*domain.Task, error) {
-	// Generate a new UUID
 	taskID, err := uuid.NewV4()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate UUID: %w", err)
 	}
 
-	// SQL query to insert a new task
-	query := `
-		INSERT INTO tasks (id, user_id, title, description, completed) 
-			VALUES ($1, $2, $3, $4, $5) 
-		RETURNING id, user_id, title, description, completed, created_at, updated_at;`
+	const query = `
+		INSERT INTO tasks (id, user_id, title, description, completed)
+			VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, user_id, title, description, completed, created_at, updated_at;
+	`
 
-	// Task instance to hold the result
-	newTask := &domain.Task{}
-
-	// Execute the query and scan the result into newTask
-	err = t.dbpool.QueryRow(
-		ctx,
-		query,
-		taskID,
-		task.UserID,
-		task.Title,
-		task.Description,
-		task.Completed,
-	).Scan(
-		&newTask.ID,
-		&newTask.UserID,
-		&newTask.Title,
-		&newTask.Description,
-		&newTask.Completed,
-		&newTask.CreatedAt,
-		&newTask.UpdatedAt,
+	result := &domain.Task{}
+	err = t.dbpool.QueryRow(ctx, query, taskID, task.UserID, task.Title, task.Description, task.Completed).Scan(
+		&result.ID,
+		&result.UserID,
+		&result.Title,
+		&result.Description,
+		&result.Completed,
+		&result.CreatedAt,
+		&result.UpdatedAt,
 	)
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert task: %w", err)
 	}
 
-	return newTask, nil
+	return result, nil
 }
 
-func (t *TaskRepositoryImpl) GetTask(ctx context.Context, id string) (*domain.Task, error) {
-	query := `
+func (r *TaskRepositoryImpl) ListAllTasks(ctx context.Context) ([]*domain.Task, error) {
+	const query = `
+		SELECT id, user_id, title, description, completed, created_at, updated_at 
+		FROM tasks;`
+
+	rows, err := r.dbpool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*domain.Task
+	for rows.Next() {
+		var task domain.Task
+		if err := rows.Scan(
+			&task.ID,
+			&task.UserID,
+			&task.Title,
+			&task.Description,
+			&task.Completed,
+			&task.CreatedAt,
+			&task.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan task: %w", err)
+		}
+		tasks = append(tasks, &task)
+	}
+
+	return tasks, nil
+}
+
+func (r *TaskRepositoryImpl) GetTask(ctx context.Context, taskID string) (*domain.Task, error) {
+	const query = `
 		SELECT id, user_id, title, description, completed, created_at, updated_at 
 		FROM tasks 
 		WHERE id = $1;`
 
 	task := &domain.Task{}
-
-	err := t.dbpool.QueryRow(ctx, query, id).Scan(
+	err := r.dbpool.QueryRow(ctx, query, taskID).Scan(
 		&task.ID,
 		&task.UserID,
 		&task.Title,
@@ -80,7 +97,6 @@ func (t *TaskRepositoryImpl) GetTask(ctx context.Context, id string) (*domain.Ta
 		&task.CreatedAt,
 		&task.UpdatedAt,
 	)
-
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("task not found: %w", err)
@@ -92,30 +108,29 @@ func (t *TaskRepositoryImpl) GetTask(ctx context.Context, id string) (*domain.Ta
 }
 
 func (t *TaskRepositoryImpl) UpdateTask(ctx context.Context, task *domain.Task) (*domain.Task, error) {
+	const query = `
+		UPDATE tasks
+		SET title = $1, description = $2, completed = $3, updated_at = NOW()
+		WHERE id = $4
+		RETURNING id, user_id, title, description, completed, created_at, updated_at;
+	`
 
-	query := `
-		UPDATE tasks 
-		SET title = $1, description = $2, completed = $3, updated_at = NOW() 
-		WHERE id = $4 
-		RETURNING id, user_id, title, description, completed, created_at, updated_at;`
-
-	newTask := &domain.Task{}
-
+	updatedTask := &domain.Task{}
 	err := t.dbpool.QueryRow(ctx, query, task.Title, task.Description, task.Completed, task.ID).Scan(
-		&newTask.ID,
-		&newTask.UserID,
-		&newTask.Title,
-		&newTask.Description,
-		&newTask.Completed,
-		&newTask.CreatedAt,
-		&newTask.UpdatedAt,
+		&updatedTask.ID,
+		&updatedTask.UserID,
+		&updatedTask.Title,
+		&updatedTask.Description,
+		&updatedTask.Completed,
+		&updatedTask.CreatedAt,
+		&updatedTask.UpdatedAt,
 	)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to update task: %w", err)
 	}
 
-	return newTask, nil
+	return updatedTask, nil
 }
 
 func (r *TaskRepositoryImpl) DeleteTask(ctx context.Context, id string) error {
@@ -133,24 +148,22 @@ func (r *TaskRepositoryImpl) DeleteTask(ctx context.Context, id string) error {
 	return nil
 }
 
-func (t *TaskRepositoryImpl) ListTasksByUser(ctx context.Context, userID string) ([]*domain.Task, error) {
-
-	query := `
+func (r *TaskRepositoryImpl) ListTasksByUser(ctx context.Context, userID string) ([]*domain.Task, error) {
+	const query = `
 		SELECT id, user_id, title, description, completed, created_at, updated_at 
 		FROM tasks 
 		WHERE user_id = $1;`
 
-	rows, err := t.dbpool.Query(ctx, query, userID)
+	rows, err := r.dbpool.Query(ctx, query, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list tasks: %w", err)
 	}
-
 	defer rows.Close()
 
 	var tasks []*domain.Task
 	for rows.Next() {
-		task := &domain.Task{}
-		err := rows.Scan(
+		var task domain.Task
+		if err := rows.Scan(
 			&task.ID,
 			&task.UserID,
 			&task.Title,
@@ -158,11 +171,10 @@ func (t *TaskRepositoryImpl) ListTasksByUser(ctx context.Context, userID string)
 			&task.Completed,
 			&task.CreatedAt,
 			&task.UpdatedAt,
-		)
-		if err != nil {
+		); err != nil {
 			return nil, fmt.Errorf("failed to scan task: %w", err)
 		}
-		tasks = append(tasks, task)
+		tasks = append(tasks, &task)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -172,7 +184,7 @@ func (t *TaskRepositoryImpl) ListTasksByUser(ctx context.Context, userID string)
 	return tasks, nil
 }
 
-func (t *TaskRepositoryImpl) MarkTaskComplete(ctx context.Context, taskID string) (*domain.Task, error) {
+func (r *TaskRepositoryImpl) MarkTaskComplete(ctx context.Context, id string) (*domain.Task, error) {
 	const query = `
 		UPDATE tasks 
 		SET completed = true, updated_at = NOW() 
@@ -180,20 +192,20 @@ func (t *TaskRepositoryImpl) MarkTaskComplete(ctx context.Context, taskID string
 		RETURNING id, user_id, title, description, completed, created_at, updated_at;
 	`
 
-	var updatedTask domain.Task
-	err := t.dbpool.QueryRow(ctx, query, taskID).Scan(
-		&updatedTask.ID,
-		&updatedTask.UserID,
-		&updatedTask.Title,
-		&updatedTask.Description,
-		&updatedTask.Completed,
-		&updatedTask.CreatedAt,
-		&updatedTask.UpdatedAt,
+	task := &domain.Task{}
+	err := r.dbpool.QueryRow(ctx, query, id).Scan(
+		&task.ID,
+		&task.UserID,
+		&task.Title,
+		&task.Description,
+		&task.Completed,
+		&task.CreatedAt,
+		&task.UpdatedAt,
 	)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to mark task complete: %w", err)
 	}
 
-	return &updatedTask, nil
+	return task, nil
 }
